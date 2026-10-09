@@ -96,7 +96,7 @@ const artifacts = [`${stem}.zip`, `${stem}.xpi`, `${stem}-source.zip`];
 const checksums = artifacts.map((name) => {
   const checksum = `${createHash("sha256").update(fs.readFileSync(path.join(dist, name))).digest("hex")}  ${name}\n`;
   // Preserve the existing release workflow's per-artifact checksum names.
-  fs.writeFileSync(path.join(dist, name.replace(/\.(?:zip|xpi)$/u, ".sha256")), checksum);
+  fs.writeFileSync(path.join(dist, name.endsWith(".zip") ? name.slice(0, -4) + ".sha256" : name + ".sha256"), checksum);
   return checksum;
 });
 fs.writeFileSync(path.join(dist, "SHA256SUMS"), checksums.join(""));
