@@ -318,9 +318,10 @@
         ? stored[storageKey].filter((id) => Number.isSafeInteger(id))
         : [],
     );
-    if (windowIds.has(windowId)) {
-      return;
-    }
+    const destinationKey = "codexSidePanelOpenDestinations";
+    const destinations = (await firefox.storage.session.get(destinationKey))[destinationKey] ?? {};
+    await firefox.storage.session.set({ [destinationKey]: { ...destinations, [windowId]: "local" } });
+    if (windowIds.has(windowId)) return;
     windowIds.add(windowId);
     await firefox.storage.session.set({ [storageKey]: [...windowIds] });
     sidePanelOpened.emit({ windowId });
@@ -398,7 +399,22 @@
     },
   });
 
+  const sidePanelOptionsByTab = new Map();
+  let defaultSidePanelOptions = { enabled: true, path: "codex-sidepanel/index.html" };
   const sidePanelCompat = {
+    async getOptions({ tabId } = {}) {
+      return { ...defaultSidePanelOptions, ...(sidePanelOptionsByTab.get(tabId) ?? {}), ...(tabId == null ? {} : { tabId }) };
+    },
+    async setOptions({ tabId, ...options }) {
+      // Firefox has one native sidebar, not Chrome's per-tab side-panel hosts.
+      // Keep option queries coherent, but do not switch to the Chrome-only Work
+      // host or disable the user's native sidebar on a background tab update.
+      if (options.path != null && options.path !== "codex-sidepanel/index.html") {
+        throw new Error("The Firefox port supports the local sidebar only.");
+      }
+      if (tabId == null) defaultSidePanelOptions = { ...defaultSidePanelOptions, ...options };
+      else sidePanelOptionsByTab.set(tabId, { ...sidePanelOptionsByTab.get(tabId), ...options });
+    },
     onOpened: sidePanelOpened,
     onClosed: sidePanelClosed,
     setPanelBehavior: async () => {},
@@ -790,7 +806,35 @@
             });
           }
           parseSelector(selector) {
-            const parts = String(selector).split(" >> ").map((source) => {
+            // Browser Use serializes locators using Playwright's internal
+            // selector grammar. A delimiter inside a quoted name or regexp is
+            // content, not another engine in the chain.
+            const input = String(selector);
+            const sources = [];
+            let start = 0;
+            let quote = null;
+            let regexp = false;
+            let regexpClass = false;
+            for (let index = 0; index < input.length; index += 1) {
+              const char = input[index];
+              if (char === "\\") { index += 1; continue; }
+              if (quote != null) { if (char === quote) quote = null; continue; }
+              if (regexp) {
+                if (char === "[") regexpClass = true;
+                if (char === "]") regexpClass = false;
+                if (char === "/" && !regexpClass) regexp = false;
+                continue;
+              }
+              if (char === '"' || char === "'") { quote = char; continue; }
+              if (char === "/" && /=\s*$/u.test(input.slice(start, index))) { regexp = true; continue; }
+              if (char === ">" && input[index + 1] === ">") {
+                sources.push(input.slice(start, index).trim());
+                start = index + 2;
+                index += 1;
+              }
+            }
+            sources.push(input.slice(start).trim());
+            const parts = sources.map((source) => {
               const engine = /^([a-z][\w-]*(?::[\w-]+)?)=([\s\S]*)$/iu.exec(source);
               if (engine == null) return { name: "css", body: source, source };
               return { name: engine[1], body: engine[2], source };
@@ -801,6 +845,7 @@
             let matches = [root];
             const deepQuery = (scope, selector) => {
               const found = [...(scope.querySelectorAll?.(selector) ?? [])];
+              if (scope.shadowRoot) found.push(...deepQuery(scope.shadowRoot, selector));
               for (const element of [...(scope.querySelectorAll?.("*") ?? [])]) {
                 if (element.shadowRoot) found.push(...deepQuery(element.shadowRoot, selector));
               }
@@ -808,6 +853,8 @@
             };
             const textBody = (body) => {
               const source = String(body);
+              const regexp = /^\/([\s\S]*)\/([dgimsuvy]*)$/u.exec(source);
+              if (regexp != null) return { regexp: new RegExp(regexp[1], regexp[2]) };
               const flagged = /^([\s\S]*)([is])$/u.exec(source);
               let flag = null;
               let value = source;
@@ -823,6 +870,84 @@
               return { value, caseSensitive: flag === "s" };
             };
             const normalizeText = (value) => String(value).replace(/\s+/gu, " ").trim();
+            const matchesText = (value, matcher, exact = false) => {
+              if (matcher.regexp) {
+                matcher.regexp.lastIndex = 0;
+                return matcher.regexp.test(String(value));
+              }
+              const actual = normalizeText(value);
+              const expected = normalizeText(matcher.value);
+              if (matcher.caseSensitive) return exact ? actual === expected : actual.includes(expected);
+              return actual.toLowerCase().includes(expected.toLowerCase());
+            };
+            const elementText = (element) => {
+              if (["SCRIPT", "STYLE", "HEAD"].includes(element.tagName)) return "";
+              if (element.tagName === "INPUT" && ["button", "submit", "reset"].includes(element.type)) return element.value ?? "";
+              if (element.childNodes?.length) {
+                return [...element.childNodes].map((child) => child.nodeType === Node.TEXT_NODE
+                  ? child.nodeValue ?? "" : elementText(child)).join("")
+                  + (element.shadowRoot ? elementText(element.shadowRoot) : "");
+              }
+              return (element.textContent ?? "") + (element.shadowRoot ? elementText(element.shadowRoot) : "");
+            };
+            // This static helper covers common native controls and explicit
+            // roles, not the complete AccName algorithm used by Playwright.
+            const roleFor = (element) => {
+              const explicit = element.getAttribute?.("role");
+              if (explicit) return explicit.trim().split(/\s+/u)[0];
+              if (/^H[1-6]$/u.test(element.tagName)) return "heading";
+              if (element.tagName === "A") return element.hasAttribute("href") ? "link" : null;
+              if (element.tagName === "INPUT") {
+                if (["button", "submit", "reset", "image"].includes(element.type)) return "button";
+                if (["checkbox", "radio"].includes(element.type)) return element.type;
+                if (element.type === "search") return "searchbox";
+                if (element.type === "number") return "spinbutton";
+                if (element.type === "range") return "slider";
+                if (["text", "email", "tel", "url"].includes(element.type)) return element.hasAttribute("list") ? "combobox" : "textbox";
+                return null;
+              }
+              if (element.tagName === "SELECT") return element.multiple || element.size > 1 ? "listbox" : "combobox";
+              return ({ BUTTON: "button", TEXTAREA: "textbox", IMG: "img", MAIN: "main", NAV: "navigation" })[element.tagName] ?? null;
+            };
+            const nameFor = (element) => {
+              const labelledBy = element.getAttribute?.("aria-labelledby");
+              if (labelledBy) {
+                const labels = labelledBy.trim().split(/\s+/u).map((id) => element.ownerDocument?.getElementById(id)
+                  ?? document.getElementById?.(id)).filter(Boolean);
+                if (labels.length) return labels.map(elementText).join(" ");
+              }
+              const label = element.getAttribute?.("aria-label");
+              if (label?.trim()) return label;
+              if (element.labels?.length) return [...element.labels].map(elementText).join(" ");
+              if (["IMG", "INPUT"].includes(element.tagName) && element.hasAttribute("alt")) return element.getAttribute("alt");
+              return elementText(element) || element.getAttribute?.("title") || element.getAttribute?.("placeholder") || "";
+            };
+            const hiddenForRole = (element) => {
+              for (let ancestor = element; ancestor instanceof Element;
+                ancestor = ancestor.parentElement ?? ancestor.getRootNode?.()?.host) {
+                const style = getComputedStyle(ancestor);
+                if (ancestor.hidden || ancestor.getAttribute("aria-hidden") === "true"
+                  || style.display === "none") return true;
+              }
+              return ["hidden", "collapse"].includes(getComputedStyle(element).visibility);
+            };
+            const roleOptions = (body) => {
+              const role = /^([\w-]+)/u.exec(body);
+              if (!role) throw new Error("Invalid Firefox Playwright role selector");
+              const options = { role: role[1].toLowerCase(), includeHidden: false };
+              let rest = body.slice(role[0].length);
+              while (rest) {
+                const attribute = /^\[(name|level|include-hidden)=("(?:\\.|[^"\\])*"[is]?|\/(?:\\.|[^/\\])*\/[dgimsuvy]*|\d+|true|false)\]/u.exec(rest);
+                if (!attribute) throw new Error(`Unsupported Firefox Playwright role attribute: ${rest}`);
+                const [, key, value] = attribute;
+                if (key === "name" && (value.startsWith('"') || value.startsWith("/"))) options.name = textBody(value);
+                else if (key === "level" && options.role === "heading" && /^\d+$/u.test(value)) options.level = Number(value);
+                else if (key === "include-hidden" && /^(true|false)$/u.test(value)) options.includeHidden = value === "true";
+                else throw new Error(`Unsupported Firefox Playwright role attribute: ${attribute[0]}`);
+                rest = rest.slice(attribute[0].length);
+              }
+              return options;
+            };
             for (const part of parsedSelector.parts ?? []) {
               if (part.name === "nth") {
                 let index = Number(part.body);
@@ -830,10 +955,26 @@
                 matches = matches.slice(index, index + 1);
                 continue;
               }
+              // hasText filters the current candidate; it must not query and
+              // return a matching descendant (which could change click targets).
+              if (part.name === "internal:has-text" || part.name === "internal:has-not-text") {
+                const matcher = textBody(part.body);
+                matches = matches.filter((element) => matchesText(elementText(element), matcher)
+                  === (part.name === "internal:has-text"));
+                continue;
+              }
+              const options = part.name === "internal:role" ? roleOptions(part.body) : null;
               const next = [];
               for (const scope of matches) {
                 if (part.name === "css") {
                   next.push(...deepQuery(scope, part.body));
+                } else if (options != null) {
+                  next.push(...deepQuery(scope, "*").filter((element) => {
+                    if (roleFor(element) !== options.role || (!options.includeHidden && hiddenForRole(element))) return false;
+                    if (options.level != null && Number(element.getAttribute("aria-level")
+                      ?? element.tagName.slice(1)) !== options.level) return false;
+                    return options.name == null || matchesText(normalizeText(nameFor(element)), options.name, true);
+                  }));
                 } else if (part.name === "internal:label") {
                   const labelMatcher = textBody(part.body);
                   const expected = normalizeText(labelMatcher.value);
@@ -848,7 +989,9 @@
                       : label.toLowerCase().includes(expected.toLowerCase()));
                   }));
                 } else if (part.name === "internal:control" && part.body === "enter-frame") {
-                  continue;
+                  const frameDocument = scope.contentDocument;
+                  if (frameDocument == null) throw new Error("Cross-origin frame selectors require a separate CDP frame session.");
+                  next.push(frameDocument);
                 } else {
                   throw new Error(`Unsupported Firefox Playwright selector engine: ${part.name}`);
                 }
@@ -909,38 +1052,95 @@
         const root = payload.rootBackendNodeId == null
           ? document.documentElement
           : (state.nodes.get(payload.rootBackendNodeId) ?? document.documentElement);
-        const elements = [root, ...(root.querySelectorAll?.("*") ?? [])]
-          .filter((element) => element instanceof Element);
-        const ids = new Map(elements.map((element) => [element, `firefox-ax-${nodeId(element)}`]));
-        const roleFor = (element) => element.getAttribute?.("role") || ({
-          A: "link", BUTTON: "button", INPUT: element.type === "checkbox" ? "checkbox" : "textbox",
-          TEXTAREA: "textbox", SELECT: "combobox", IMG: "img", H1: "heading", H2: "heading",
-          H3: "heading", MAIN: "main", NAV: "navigation", FORM: "form",
-        }[element.tagName] ?? (element.isContentEditable ? "textbox" : "generic"));
-        const nameFor = (element) => element.getAttribute?.("aria-label")
-          || element.getAttribute?.("alt")
-          || element.getAttribute?.("title")
-          || element.getAttribute?.("placeholder")
-          || element.labels?.[0]?.textContent?.trim()
-          || element.textContent?.trim()?.slice(0, 500)
-          || "";
-        return {
-          nodes: elements.map((element) => {
-            const backendDOMNodeId = nodeId(element);
-            return {
-              nodeId: ids.get(element),
-              ignored: false,
-              role: { type: "role", value: roleFor(element) },
-              name: { type: "computedString", value: nameFor(element) },
-              description: { type: "computedString", value: element.getAttribute?.("aria-description") ?? "" },
-              value: { type: "computedString", value: element.value ?? element.textContent ?? "" },
-              properties: [],
-              childIds: [...element.children].map((child) => ids.get(child)).filter(Boolean),
-              backendDOMNodeId,
-              frameId: payload.frameId,
-            };
-          }),
+        const excludedTags = new Set(["HEAD", "SCRIPT", "STYLE", "TEMPLATE", "NOSCRIPT"]);
+        const hidden = (element) => {
+          if (excludedTags.has(element.tagName) || element.hidden || element.inert
+            || element.getAttribute?.("aria-hidden") === "true"
+            || (element.tagName === "INPUT" && element.type === "hidden")) return true;
+          const style = getComputedStyle(element);
+          return style.display === "none" || ["hidden", "collapse"].includes(style.visibility);
         };
+        const roleFor = (element) => {
+          const explicit = element.getAttribute?.("role")?.trim().split(/\s+/u)[0];
+          if (explicit) return explicit;
+          if (element === document.documentElement) return "RootWebArea";
+          if (element.tagName === "INPUT") return ({
+            button: "button", submit: "button", reset: "button", checkbox: "checkbox",
+            radio: "radio", range: "slider", number: "spinbutton", search: "searchbox",
+          }[element.type] ?? "textbox");
+          return ({
+            A: element.hasAttribute("href") ? "link" : "generic", BUTTON: "button",
+            TEXTAREA: "textbox", SELECT: element.multiple ? "listbox" : "combobox",
+            OPTION: "option", IMG: "image", H1: "heading", H2: "heading", H3: "heading",
+            H4: "heading", H5: "heading", H6: "heading", MAIN: "main", NAV: "navigation",
+            FORM: "form", TABLE: "table", TR: "row", TH: "columnheader", TD: "cell",
+            UL: "list", OL: "list", LI: "listitem", IFRAME: "Iframe", FRAME: "Iframe",
+          }[element.tagName] ?? (element.isContentEditable ? "textbox" : "generic"));
+        };
+        // Read rendered descendants only for roles whose names come from content.
+        // Generic ancestors used to duplicate entire documents (including scripts)
+        // in both name and value, making snapshots quadratic in page depth.
+        const textFor = (node, includeHidden = false) => {
+          if (node.nodeType === Node.TEXT_NODE) return node.nodeValue ?? "";
+          if (node instanceof Element && (excludedTags.has(node.tagName) || (!includeHidden && hidden(node)))) return "";
+          return [...(node.childNodes ?? []), ...(node.shadowRoot?.childNodes ?? [])]
+            .map((child) => textFor(child, includeHidden)).join(" ");
+        };
+        const normalize = (text) => String(text ?? "").replace(/\s+/gu, " ").trim();
+        const contentNamedRoles = new Set(["button", "link", "heading", "option", "tab", "menuitem", "checkbox", "radio", "switch", "cell", "columnheader", "rowheader"]);
+        const nameFor = (element, role) => {
+          if (role === "RootWebArea") return document.title ?? "";
+          const labelledBy = element.getAttribute?.("aria-labelledby");
+          if (labelledBy) {
+            const name = normalize(labelledBy.trim().split(/\s+/u).map((id) => textFor(document.getElementById(id) ?? {}, true)).join(" "));
+            if (name) return name;
+          }
+          const labels = [...(element.labels ?? [])].map((label) => textFor(label, true)).join(" ");
+          return normalize(element.getAttribute?.("aria-label") || labels
+            || element.getAttribute?.("alt") || element.getAttribute?.("title")
+            || element.getAttribute?.("placeholder")
+            || (contentNamedRoles.has(role) ? textFor(element) : ""));
+        };
+        const nodes = [];
+        const visit = (node, parentId) => {
+          const isText = node.nodeType === Node.TEXT_NODE;
+          if (!isText && (!(node instanceof Element) || hidden(node))) return null;
+          const name = isText ? normalize(node.nodeValue) : nameFor(node, roleFor(node));
+          if (isText && !name) return null;
+          const backendDOMNodeId = nodeId(node);
+          const id = `firefox-ax-${backendDOMNodeId}`;
+          const role = isText ? "StaticText" : roleFor(node);
+          const entry = {
+            nodeId: id, ignored: false,
+            role: { type: "role", value: role },
+            name: { type: "computedString", value: name },
+            properties: [], childIds: [], backendDOMNodeId, frameId: payload.frameId,
+          };
+          if (parentId) entry.parentId = parentId;
+          if (!isText) {
+            const description = node.getAttribute?.("aria-description");
+            if (description) entry.description = { type: "computedString", value: description };
+            if (typeof node.value === "string" && node.type !== "password") {
+              entry.value = { type: "string", value: node.value };
+            } else if (node.isContentEditable) {
+              entry.value = { type: "string", value: normalize(textFor(node)) };
+            }
+            if (node.disabled) entry.properties.push({ name: "disabled", value: { type: "boolean", value: true } });
+            if (node.readOnly) entry.properties.push({ name: "readonly", value: { type: "boolean", value: true } });
+            if ("checked" in node && ["checkbox", "radio", "switch"].includes(role)) {
+              entry.properties.push({ name: "checked", value: { type: "tristate", value: String(node.checked) } });
+            }
+            if (role === "heading") entry.properties.push({ name: "level", value: { type: "integer", value: Number(node.getAttribute("aria-level") ?? node.tagName.slice(1)) } });
+          }
+          nodes.push(entry);
+          for (const child of [...(node.childNodes ?? []), ...(node.shadowRoot?.childNodes ?? [])]) {
+            const childId = visit(child, id);
+            if (childId) entry.childIds.push(childId);
+          }
+          return id;
+        };
+        visit(root, null);
+        return { nodes };
       }
       case "captureDomSnapshot": {
         const strings = [];
@@ -4604,6 +4804,7 @@
   });
 
   firefox.tabs.onRemoved.addListener((tabId) => {
+    sidePanelOptionsByTab.delete(tabId);
     clearLifecycleState(tabId);
     navigationStateByTab.delete(tabId);
     initScriptsByTab.delete(tabId);
@@ -4728,6 +4929,38 @@
     return Promise.resolve({ ok: true });
   });
 
+  // Firefox exposes the DNR methods and ResourceType enum, but not Chromium's
+  // RuleActionType/HeaderOperation constants. The refreshed lease reconciler
+  // uses those constants when a tab is first claimed, not during idle startup.
+  const declarativeNetRequestCompat = firefox.declarativeNetRequest == null ? undefined
+    : new Proxy(firefox.declarativeNetRequest, {
+      get(target, property) {
+        if (property === "RuleActionType") return target.RuleActionType ?? {
+          ALLOW: "allow", ALLOW_ALL_REQUESTS: "allowAllRequests", BLOCK: "block",
+          MODIFY_HEADERS: "modifyHeaders", REDIRECT: "redirect", UPGRADE_SCHEME: "upgradeScheme",
+        };
+        if (property === "HeaderOperation") return target.HeaderOperation ?? {
+          APPEND: "append", REMOVE: "remove", SET: "set",
+        };
+        if (property === "updateSessionRules") return (options) => {
+          const hostname = new URL(firefox.runtime.getURL("/")).hostname;
+          const domains = (values) => values?.map((value) => value === firefox.runtime.id ? hostname : value);
+          return target.updateSessionRules({
+            ...options,
+            addRules: options.addRules?.map((rule) => ({
+              ...rule,
+              condition: {
+                ...rule.condition,
+                ...(rule.condition?.initiatorDomains ? { initiatorDomains: domains(rule.condition.initiatorDomains) } : {}),
+                ...(rule.condition?.excludedInitiatorDomains ? { excludedInitiatorDomains: domains(rule.condition.excludedInitiatorDomains) } : {}),
+              },
+            })),
+          });
+        };
+        return bindValue(target, property);
+      },
+    });
+
   const chromeCompat = new Proxy(firefox, {
     get(target, property) {
       if (property === "runtime") {
@@ -4741,6 +4974,9 @@
       }
       if (property === "sidePanel") {
         return sidePanelCompat;
+      }
+      if (property === "declarativeNetRequest") {
+        return declarativeNetRequestCompat;
       }
       return bindValue(target, property);
     },

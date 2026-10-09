@@ -1,0 +1,13 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+const html=fs.readFileSync('extension/codex-sidepanel/index.html','utf8');
+const css=fs.readFileSync('extension/codex-sidepanel/firefox-sidebar-layout.css','utf8');
+assert.ok(html.indexOf('@layer properties, theme, base, components, utilities')<html.indexOf('rel="modulepreload"'),'Tailwind layer order must precede lazy dependency styles');
+assert.ok(html.includes('firefox-sidebar-layout.css'));
+assert.match(css,/font-size:\s*16px/u);
+assert.match(css,/min-height:\s*0/u);
+assert.match(css,/@container composer-footer/u);
+const sources=fs.readdirSync('extension/codex-sidepanel/assets').filter(f=>f.endsWith('.js')).map(f=>fs.readFileSync(path.join('extension/codex-sidepanel/assets',f),'utf8'));
+assert.ok(sources.some(s=>s.includes('data-composer-navigation-target')&&s.includes('ModelPickerTriggerEffortLabel')),'The narrow-layout rule must still target a packaged model picker');
+console.log(JSON.stringify({ok:true,layerOrder:true,hostSizing:true,narrowComposer:true}));
