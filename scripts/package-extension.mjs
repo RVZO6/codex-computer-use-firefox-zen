@@ -14,7 +14,36 @@ for (const script of ["check-version.mjs", "verify-extension.mjs"]) {
 if (execFileSync("git", ["status", "--porcelain", "--untracked-files=normal"], { encoding: "utf8" }).trim()) {
   throw new Error("Commit the source before packaging so the source archive matches the extension.");
 }
-const { version } = JSON.parse(fs.readFileSync("version.json", "utf8"));
+// Freeze one tree for both artifacts. Checkout filters (such as autocrlf)
+// and ignored local files must never affect the reviewed package bytes.
+const commit = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+const entries = execFileSync("git", ["ls-tree", "-rz", "--full-tree", commit], {
+  encoding: "utf8", maxBuffer: 16 * 1024 * 1024,
+}).split("\0").filter(Boolean).map(entry => {
+  const match = /^(\d+) (\w+) ([a-f\d]+)\t([\s\S]+)$/u.exec(entry);
+  if (!match || match[2] !== "blob" || !["100644", "100755"].includes(match[1])) {
+    throw new Error(`Refusing to package non-regular committed entry ${entry}`);
+  }
+  return { name: match[4], object: match[3], mode: parseInt(match[1], 8) };
+}).sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+const blobs = execFileSync("git", ["cat-file", "--batch"], {
+  input: entries.map(entry => entry.object).join("\n") + "\n",
+  maxBuffer: 256 * 1024 * 1024,
+});
+let cursor = 0;
+const sourceFiles = entries.map(entry => {
+  const end = blobs.indexOf(10, cursor);
+  const header = blobs.subarray(cursor, end).toString("ascii").split(" ");
+  const size = Number(header[2]);
+  if (end < 0 || header[0] !== entry.object || header[1] !== "blob" || !Number.isSafeInteger(size)) {
+    throw new Error(`Invalid committed blob for ${entry.name}`);
+  }
+  cursor = end + 1;
+  const data = blobs.subarray(cursor, cursor + size);
+  cursor += size + 1;
+  return { name: entry.name, data, mode: entry.mode };
+});
+const { version } = JSON.parse(sourceFiles.find(file => file.name === "version.json").data);
 const stem = `codex-computer-use-firefox-zen-${version}`;
 const dist = path.join(root, "dist");
 fs.mkdirSync(dist, { recursive: true });
@@ -29,68 +58,62 @@ function crc32(data) {
   return (crc ^ 0xffffffff) >>> 0;
 }
 
-const files = [];
-function walk(directory, prefix = "") {
-  const entries = fs.readdirSync(directory, { withFileTypes: true }).sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
-  for (const entry of entries) {
-    const name = prefix + entry.name;
-    const full = path.join(directory, entry.name);
-    if (entry.isSymbolicLink()) throw new Error(`Refusing to package symlink ${name}`);
-    if (entry.isDirectory()) walk(full, `${name}/`);
-    else if (entry.isFile()) files.push({ name, data: fs.readFileSync(full) });
-  }
-}
-walk(path.join(root, "extension"));
-if (files.length >= 65535) throw new Error("ZIP64 is not supported by this packager.");
+const files = sourceFiles.filter(file => file.name.startsWith("extension/"))
+  .map(file => ({ name: file.name.slice("extension/".length), data: file.data, mode: file.mode }));
 
-const parts = [];
-const central = [];
-let offset = 0;
-for (const { name, data } of files) {
-  const filename = Buffer.from(name);
-  const compressed = deflateRawSync(data, { level: 9 });
-  const crc = crc32(data);
-  if (filename.length > 65535 || data.length > 0xffffffff || offset > 0xffffffff) {
-    throw new Error(`ZIP64 is required for ${name}.`);
+function zip(files) {
+  if (files.length >= 65535) throw new Error("ZIP64 is not supported by this packager.");
+  const parts = [];
+  const central = [];
+  let offset = 0;
+  for (const { name, data, mode } of files) {
+    const filename = Buffer.from(name);
+    const compressed = deflateRawSync(data, { level: 9 });
+    const crc = crc32(data);
+    if (filename.length > 65535 || data.length > 0xffffffff || offset > 0xffffffff) {
+      throw new Error(`ZIP64 is required for ${name}.`);
+    }
+    // ZIP-standard paths, UTF-8 names, and a fixed 1980-01-01 timestamp.
+    const local = Buffer.alloc(30);
+    local.writeUInt32LE(0x04034b50);
+    local.writeUInt16LE(20, 4);
+    local.writeUInt16LE(0x800, 6);
+    local.writeUInt16LE(8, 8);
+    local.writeUInt16LE(0x21, 12);
+    local.writeUInt32LE(crc, 14);
+    local.writeUInt32LE(compressed.length, 18);
+    local.writeUInt32LE(data.length, 22);
+    local.writeUInt16LE(filename.length, 26);
+    const entry = Buffer.alloc(46);
+    entry.writeUInt32LE(0x02014b50);
+    entry.writeUInt16LE((3 << 8) | 20, 4); // Unix creator: preserve committed file modes.
+    entry.writeUInt16LE(20, 6);
+    entry.writeUInt16LE(0x800, 8);
+    entry.writeUInt16LE(8, 10);
+    entry.writeUInt16LE(0x21, 14);
+    entry.writeUInt32LE(crc, 16);
+    entry.writeUInt32LE(compressed.length, 20);
+    entry.writeUInt32LE(data.length, 24);
+    entry.writeUInt16LE(filename.length, 28);
+    entry.writeUInt32LE((mode << 16) >>> 0, 38);
+    entry.writeUInt32LE(offset, 42);
+    parts.push(local, filename, compressed);
+    central.push(entry, filename);
+    offset += local.length + filename.length + compressed.length;
   }
-  // ZIP-standard paths, UTF-8 names, and a fixed 1980-01-01 timestamp.
-  const local = Buffer.alloc(30);
-  local.writeUInt32LE(0x04034b50);
-  local.writeUInt16LE(20, 4);
-  local.writeUInt16LE(0x800, 6);
-  local.writeUInt16LE(8, 8);
-  local.writeUInt16LE(0x21, 12);
-  local.writeUInt32LE(crc, 14);
-  local.writeUInt32LE(compressed.length, 18);
-  local.writeUInt32LE(data.length, 22);
-  local.writeUInt16LE(filename.length, 26);
-  const entry = Buffer.alloc(46);
-  entry.writeUInt32LE(0x02014b50);
-  entry.writeUInt16LE(20, 4);
-  entry.writeUInt16LE(20, 6);
-  entry.writeUInt16LE(0x800, 8);
-  entry.writeUInt16LE(8, 10);
-  entry.writeUInt16LE(0x21, 14);
-  entry.writeUInt32LE(crc, 16);
-  entry.writeUInt32LE(compressed.length, 20);
-  entry.writeUInt32LE(data.length, 24);
-  entry.writeUInt16LE(filename.length, 28);
-  entry.writeUInt32LE(offset, 42);
-  parts.push(local, filename, compressed);
-  central.push(entry, filename);
-  offset += local.length + filename.length + compressed.length;
+  const centralData = Buffer.concat(central);
+  if (offset + centralData.length > 0xffffffff) throw new Error("ZIP64 is required for this archive.");
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50);
+  end.writeUInt16LE(files.length, 8);
+  end.writeUInt16LE(files.length, 10);
+  end.writeUInt32LE(centralData.length, 12);
+  end.writeUInt32LE(offset, 16);
+  return Buffer.concat([...parts, centralData, end]);
 }
-const centralData = Buffer.concat(central);
-if (offset + centralData.length > 0xffffffff) throw new Error("ZIP64 is required for this archive.");
-const end = Buffer.alloc(22);
-end.writeUInt32LE(0x06054b50);
-end.writeUInt16LE(files.length, 8);
-end.writeUInt16LE(files.length, 10);
-end.writeUInt32LE(centralData.length, 12);
-end.writeUInt32LE(offset, 16);
-const archive = Buffer.concat([...parts, centralData, end]);
+const archive = zip(files);
 for (const suffix of ["zip", "xpi"]) fs.writeFileSync(path.join(dist, `${stem}.${suffix}`), archive);
-execFileSync("git", ["archive", "--format=zip", `--output=${path.join(dist, `${stem}-source.zip`)}`, "HEAD"]);
+fs.writeFileSync(path.join(dist, `${stem}-source.zip`), zip(sourceFiles));
 
 const artifacts = [`${stem}.zip`, `${stem}.xpi`, `${stem}-source.zip`];
 const checksums = artifacts.map((name) => {
@@ -102,7 +125,7 @@ const checksums = artifacts.map((name) => {
 fs.writeFileSync(path.join(dist, "SHA256SUMS"), checksums.join(""));
 console.log(JSON.stringify({
   version,
-  commit: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
+  commit,
   files: files.length,
   artifacts: artifacts.map((name) => ({ path: path.join(dist, name), bytes: fs.statSync(path.join(dist, name)).size })),
 }, null, 2));
