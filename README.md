@@ -1,3 +1,5 @@
+> **RVZO6 experimental fork:** see [FORK_TEST_BUILD.md](FORK_TEST_BUILD.md) for the current test build, temporary-load instructions, validation, and limitations. The original upstream installation instructions below describe the signed upstream release.
+
 <p align="center">
   <img src="extension/images/firefox-zen-logo.png" alt="Codex Computer Use for Firefox and Zen Browser" width="180">
 </p>
@@ -117,7 +119,7 @@ The compatibility layer adds:
 - translated network capture, `Fetch` interception, emulation, dialogs, and viewport restoration;
 - native bridge version reporting so the add-on can detect and explain an out-of-sync installation.
 
-The port currently tracks OpenAI packaged extension version `1.2.27236.6274` (build `ad34341c30168f421705cd15f1633ebe6cea7849`). The inherited application code is byte-for-byte identical for the documented paths; the port changes only browser compatibility and packaging layers.
+The port currently tracks OpenAI packaged extension version `1.26.901.11451` (build `834ab2c3159a7637c75db757ad053344da009e8b`). The inherited application code is byte-for-byte identical for the documented paths; the port changes only browser compatibility and packaging layers.
 
 ## Local development
 

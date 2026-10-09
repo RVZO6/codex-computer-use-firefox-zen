@@ -1,3 +1,5 @@
+> Fork validation and current upstream refresh: [FORK_TEST_BUILD.md](FORK_TEST_BUILD.md). The upstream release status below is historical.
+
 # Codex Computer Use for Firefox and Zen Browser — port status
 
 Live verification was completed on July 15, 2026 with Zen Browser 1.21.6b, Gecko/Firefox 152.0.5, and the packaged OpenAI extension version `1.2.27203.26575`. All work described here stays in the normal WebExtension tier: no browser flags, patched Zen Browser build, privileged experiment API, or external automation daemon is required.
@@ -39,6 +41,18 @@ The extension was loaded temporarily from `extension/manifest.json`, its optiona
 The reusable fixture is `tests/fixtures/browser-control.html`; `npm test` covers the protocol-level native-message, upload, and WebSocket relay paths.
 
 ## Genuine Firefox limitations
+
+The static Playwright helper handles CSS, label, role/name, `nth`, and
+`hasText`/`hasNotText` selector chains. Role matching covers common native
+controls and explicit roles, names from `aria-labelledby`, `aria-label`,
+associated labels or content, heading levels, and `include-hidden`. It does
+not implement Playwright's complete accessible-name algorithm or additional
+role state filters; unsupported role attributes are rejected rather than
+ignored. The code-generation-disabled protocol test and disposable headless
+Firefox/Zen test cover the role/name and text-filter chains that failed on an
+Amazon listing. These helper tests do not establish end-to-end acceptance of
+the installed Browser Use client's locator click pipeline. The snapshot
+translation is unchanged.
 
 Normal ChatGPT computer-use workflows reached feature parity in testing. The remaining differences concern primitives that Firefox WebExtensions do not expose:
 
