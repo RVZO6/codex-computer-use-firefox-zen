@@ -51,8 +51,8 @@ role state filters; unsupported role attributes are rejected rather than
 ignored. The code-generation-disabled protocol test and disposable headless
 Firefox/Zen test cover the role/name and text-filter chains that failed on an
 Amazon listing. These helper tests do not establish end-to-end acceptance of
-the installed Browser Use client's locator click pipeline. The snapshot
-translation is unchanged.
+the installed Browser Use client's locator click pipeline. The accessibility collector also omits hidden content and repeated container text;
+this is covered in the existing isolated lifecycle test.
 
 Normal ChatGPT computer-use workflows reached feature parity in testing. The remaining differences concern primitives that Firefox WebExtensions do not expose:
 

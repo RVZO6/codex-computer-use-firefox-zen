@@ -38,8 +38,8 @@ artifacts.
   order. The Firefox root uses a predictable rem baseline and host-relative
   height; narrow composers hide secondary effort text rather than scale down
   every control. Normal page zoom remains available.
-- The upstream unlayered `button,textarea { font: inherit }` reset is moved into
-  Tailwind's `base` layer. It previously overrode every normal typography utility:
+- A scoped readable adapter uses `font: revert-layer` to bypass the upstream
+  unlayered `button,textarea { font: inherit }` reset. It previously overrode every normal typography utility:
   composer controls inherited 16px even though their `--text-sm` token was 13px.
   The earlier root-only layout check missed this. Computed control fonts and
   explicit button/textarea size and weight utilities are now asserted in live Zen.
@@ -65,10 +65,9 @@ Zen tests use disposable profiles, not the user's profile:
 
 ```sh
 FIREFOX_BINARY=/Applications/Zen.app/Contents/MacOS/zen npm run test:live
-FIREFOX_BINARY=/Applications/Zen.app/Contents/MacOS/zen npm run test:extension:live
 ```
 
-The full-extension smoke test blocks native messaging and renders real packaged
+A private, one-off full-extension smoke test (not another maintained suite) blocks native messaging and renders real packaged
 composer components at 260, 320, 384, 438 and 600 CSS pixels. It tests background
 startup, actual controlled-tab DNR rule installation/removal, visible action
 geometry, a 20px browser font default with the UI retaining its 16px rem baseline, and the
@@ -85,7 +84,7 @@ load and an actual run.
 minified code, guarded Chrome APIs, and dynamic evaluation sites. This is a
 validation result, not a claim that every upstream feature works in Firefox.
 The new accessibility regression also fails against the original collector,
-which leaks its hidden script fixture; the patched collector returns 6,901 bytes
+which leaks its hidden script fixture; the patched collector returns 7,151 bytes
 without that content.
 
 The selector helper remains a partial Playwright/AccName implementation.

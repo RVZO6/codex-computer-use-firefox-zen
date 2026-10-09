@@ -23,3 +23,12 @@ assert.ok(upstreamImportIndex > handshakeIndex, "Upstream sidebar must load only
 assert.match(bootstrap, /getViews\?\.\(\{ type: "sidebar" \}\)\?\.includes\(window\)/u);
 
 console.log(JSON.stringify({ ok: true, hostAccessBeforeSidebarBoot: true, nativeSidebarIdentity: true, firefoxTabMentionsBeforeUpstreamBoot: true, sidebarReadyBeforeUpstreamBoot: true }, null, 2));
+
+const css=fs.readFileSync("extension/codex-sidepanel/firefox-sidebar-layout.css","utf8");
+const typography=fs.readFileSync("extension/codex-sidepanel/firefox-sidebar-typography.css","utf8");
+assert.ok(html.indexOf('@layer properties, theme, base, components, utilities')<html.indexOf('rel="modulepreload"'),'Tailwind layer order must precede lazy dependency styles');
+assert.ok(html.includes('firefox-sidebar-layout.css'));
+assert.match(typography,/font-size:\s*16px/u);
+assert.match(typography,/font:\s*revert-layer/u);
+assert.match(css,/min-height:\s*0/u);
+assert.match(css,/@container composer-footer/u);
