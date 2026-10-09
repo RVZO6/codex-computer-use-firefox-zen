@@ -952,8 +952,14 @@
           if (node.nodeType === Node.TEXT_NODE) return includeHidden || parentVisible ? node.nodeValue ?? "" : "";
           if (node instanceof Element && (excludedTags.has(node.tagName) || (!includeHidden && prunesSubtree(node)))) return "";
           const nodeVisible = !(node instanceof Element) || visible(node);
+          if (node.tagName === "BR") return includeHidden || nodeVisible ? " " : "";
           // Visibility can be restored by descendants, so keep descending.
-          return childrenFor(node).map(child => textFor(child, includeHidden, nodeVisible)).join("");
+          const text = childrenFor(node).map(child => textFor(child, includeHidden, nodeVisible)).join("");
+          // Inline fragments join directly; rendered boxes create word breaks.
+          // display:contents (including slots) has no box of its own.
+          const separatesText = node instanceof Element
+            && !["inline", "contents"].includes(getComputedStyle(node).display);
+          return separatesText && (text || nodeVisible || includeHidden) ? ` ${text} ` : text;
         };
         const normalize = (text) => String(text ?? "").replace(/\s+/gu, " ").trim();
         const contentNamedRoles = new Set(["button", "link", "heading", "option", "tab", "menuitem", "checkbox", "radio", "switch", "cell", "columnheader", "rowheader"]);
