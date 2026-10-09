@@ -9,7 +9,9 @@ html[data-codex-window-type="chrome-extension"] #root {
   min-height: 0;
 }
 
-[data-composer-footer-responsive] {
+/* The shipped ComposerFooter emits its CSS-module footer class, not a
+   data attribute. Keep the module hash flexible across bundle refreshes. */
+html[data-codex-window-type="chrome-extension"] [class*="_footer_"] {
   min-width: 0;
   max-width: 100%;
 }
