@@ -5,6 +5,17 @@ import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+const sidebarRoot = path.join(root, "extension/codex-sidepanel");
+const sidebarHtml = fs.readFileSync(path.join(sidebarRoot, "index.html"), "utf8");
+const typographySource = process.env.FIREFOX_SIDEBAR_TYPOGRAPHY_SOURCE
+  || path.join(sidebarRoot, "firefox-sidebar-typography.css");
+if (!fs.existsSync(typographySource)) {
+  throw new Error(`Typography stylesheet does not exist: ${typographySource}`);
+}
+const hasTypographyRegression = true;
+const setupStyles = ["firefox-host-access.css", "firefox-companion-setup.css"];
+const sidebarStyles = [...sidebarHtml.matchAll(/href="\.\/assets\/([^"/]+\.css)"/gu)].map(m => m[1]);
+const layerOrder = /@layer properties, theme, base, components, utilities;/u.exec(sidebarHtml)?.[0] || "";
 const firefoxBinary = process.env.FIREFOX_BINARY;
 if (!firefoxBinary)
   throw new Error(
@@ -35,13 +46,6 @@ const manifest = {
 fs.writeFileSync(path.join(dir, "manifest.json"), JSON.stringify(manifest));
 let finish;
 const result = new Promise((r) => (finish = r));
-const sidebarRoot = path.join(root, "extension/codex-sidepanel");
-const sidebarHtml = fs.readFileSync(path.join(sidebarRoot, "index.html"), "utf8");
-const typographySource = process.env.FIREFOX_SIDEBAR_TYPOGRAPHY_SOURCE
-  || path.join(sidebarRoot, "firefox-sidebar-typography.css");
-const hasTypographyRegression = fs.existsSync(typographySource);
-const sidebarStyles = [...sidebarHtml.matchAll(/href="\.\/assets\/([^"/]+\.css)"/gu)].map(m => m[1]);
-const layerOrder = /@layer properties, theme, base, components, utilities;/u.exec(sidebarHtml)?.[0] || "";
 const requests = [];
 const server = http.createServer((req, res) => {
   requests.push(req.url);
@@ -56,12 +60,19 @@ const server = http.createServer((req, res) => {
     res.setHeader("content-type", "text/html");
     res.end(`<html data-codex-window-type="chrome-extension"><head><style>${layerOrder}</style>
       ${sidebarStyles.map(name => `<link rel="stylesheet" href="/sidebar-css/${name}">`).join("")}
-      <link rel="stylesheet" href="/font-compat.css"></head><body>
+      <link rel="stylesheet" href="/font-compat.css">
+      ${setupStyles.map(name => `<link rel="stylesheet" href="/setup-css/${name}">`).join("")}</head><body>
       ${["xs", "sm", "base"].map(size => `<button data-font="${size}" class="text-${size} font-medium">${size}</button>`).join("")}
-      <textarea data-font="textarea" class="text-base"></textarea></body></html>`);
+      <textarea data-font="textarea" class="text-base"></textarea>
+      <button data-font="copy" class="firefox-companion-setup__copy">Copy</button>
+      <button data-font="retry" class="firefox-companion-setup__retry">Try again</button>
+      <button data-font="permission" class="firefox-host-access__button">Allow access</button></body></html>`);
   } else if (req.url === "/font-compat.css" || sidebarStyles.some(name => req.url === `/sidebar-css/${name}`)) {
     res.setHeader("content-type", "text/css");
     res.end(fs.readFileSync(req.url === "/font-compat.css" ? typographySource : path.join(sidebarRoot, "assets", req.url.slice("/sidebar-css/".length))));
+  } else if (setupStyles.some(name => req.url === `/setup-css/${name}`)) {
+    res.setHeader("content-type", "text/css");
+    res.end(fs.readFileSync(path.join(sidebarRoot, req.url.slice("/setup-css/".length))));
   } else if (req.url === "/fixture.css") {
     res.setHeader("content-type", "text/css");
     res.end(".editor {position:relative;margin-top:200vh}.overlay {position:absolute;inset:0;background:white}");
@@ -112,9 +123,9 @@ if(${hasTypographyRegression}){
   const doc=document.querySelector('#typography').contentDocument;
   return [...doc.querySelectorAll('[data-font]')].map(e=>({name:e.dataset.font,size:doc.defaultView.getComputedStyle(e).fontSize,weight:doc.defaultView.getComputedStyle(e).fontWeight}));
  }});
- const expected={xs:'12px',sm:'13px',base:'14px',textarea:'14px'};
- if(fonts[0]?.result?.length!==4)throw Error('Typography fixture did not load');
- for(const font of fonts[0].result)if(font.size!==expected[font.name]||(font.name!=='textarea'&&font.weight!=='500'))throw Error('Font reset overrides typography: '+JSON.stringify(font));
+ const expected={xs:['12px','500'],sm:['13px','500'],base:['14px','500'],textarea:['14px',null],copy:['13px','500'],retry:['13px','500'],permission:[null,'600']};
+ if(fonts[0]?.result?.length!==7)throw Error('Typography fixture did not load');
+ for(const font of fonts[0].result)if((expected[font.name][0]&&font.size!==expected[font.name][0])||(expected[font.name][1]&&font.weight!==expected[font.name][1]))throw Error('Font reset overrides typography: '+JSON.stringify(font));
 }
 const ax=await chrome.debugger.sendCommand(debuggee,'Accessibility.getFullAXTree',{});
 const input=ax.nodes.find(n=>n.name?.value==='Repository search');
