@@ -1025,6 +1025,30 @@ assert.equal(helperQuery('internal:role=button[name="Savedraft"s]').length, 0);
 assert.strictEqual(helperQuery('internal:role=link[name="Home"s]')[0], homeLink);
 assert.strictEqual(helperQuery('internal:role=button >> internal:has-text="Savedraft"s')[0], saveButton,
   "Text filters keep their separate, hidden-inclusive text semantics.");
+const inputButtons = ["button", "submit", "reset"].map(type => {
+  const input = new StrictCspInputElement();
+  input.attributeValues.delete("aria-label");
+  input.type = type;
+  input.value = `Native ${type}`;
+  input.attributeValues.set("value", input.value);
+  return input;
+});
+const defaultInputs = ["submit", "reset"].map(type => {
+  const input = new StrictCspInputElement();
+  input.attributeValues.delete("aria-label");
+  input.type = type;
+  return input;
+});
+strictCspDocument.querySelectorAll = selector => selector === "*" ? [...inputButtons, ...defaultInputs] : [];
+for (const input of inputButtons) {
+  assert.strictEqual(helperQuery(`internal:role=button[name="${input.value}"s]`)[0], input,
+    "Native input buttons derive their accessible names from value.");
+}
+assert.strictEqual(helperQuery('internal:role=button[name="Submit"s]')[0], defaultInputs[0]);
+assert.strictEqual(helperQuery('internal:role=button[name="Reset"s]')[0], defaultInputs[1]);
+inputButtons[0].attributeValues.set("aria-label", "Explicit input name");
+assert.strictEqual(helperQuery('internal:role=button[name="Explicit input name"s]')[0], inputButtons[0],
+  "Explicit ARIA labels must still take precedence over input value.");
 strictCspDocument.querySelectorAll = originalSelectorQuery;
 delete strictCspDocument.getElementById;
 
