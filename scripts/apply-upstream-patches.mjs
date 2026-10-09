@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Reapply the two intentional patches to the pinned, already-extracted Chrome
+// Reapply the intentional patches to the pinned, already-extracted Chrome
 // sidebar assets. Fail closed if an upstream update changes either call site.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -13,4 +13,9 @@ let menu=fs.readFileSync(menuFile,'utf8');if(!menu.startsWith(imports))fs.writeF
 patch('workspace-file-tab-context-menu-BqXeq-x9.js','P=l==null?O:s(l,O)','P=absoluteFilePath(O,l??getFileTabCwd(r))');
 patch('workspace-file-tab-context-menu-BqXeq-x9.js','message:y.copyPath,onSelect:()=>{t.clipboard.writeText(P).catch(()=>g(P))}','message:P==null?{id:`firefox.fileReference.copyRelativePath`,defaultMessage:`Copy relative path`,description:`Working directory unavailable; this copies the explicit relative reference`}:y.copyPath,onSelect:()=>{t.clipboard.writeText(P??O).catch(()=>g(P??O))}');
 patch('workspace-file-tab-context-menu-BqXeq-x9.js','v(r.queryClient,{hostId:x,path:O})','v(r.queryClient,{hostId:x,path:P??O})');
+
+// An unlayered reset outranks every Tailwind typography utility, making
+// composer controls inherit Firefox's 16px font instead of their 13px token.
+// Keep the reset in base so explicit sizes and weights can win normally.
+patch('chrome-extension-sidepanel-aQf-8vya.css','button,textarea{font:inherit}@property','@layer base{button,textarea{font:inherit}}@property');
 console.log('Pinned upstream patches applied.');

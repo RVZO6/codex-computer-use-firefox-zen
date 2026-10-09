@@ -1,4 +1,4 @@
-# RVZO6 test fork — 2026.10.09.1
+# RVZO6 test fork — 2026.10.09.2
 
 This is an unsigned experimental Firefox/Zen build, based on the installed
 Chrome extension **1.26.901.11451**, build
@@ -38,6 +38,11 @@ artifacts.
   order. The Firefox root uses a predictable rem baseline and host-relative
   height; narrow composers hide secondary effort text rather than scale down
   every control. Normal page zoom remains available.
+- The upstream unlayered `button,textarea { font: inherit }` reset is moved into
+  Tailwind's `base` layer. It previously overrode every normal typography utility:
+  composer controls inherited 16px even though their `--text-sm` token was 13px.
+  The earlier root-only layout check missed this. Computed control fonts and
+  explicit button/textarea size and weight utilities are now asserted in live Zen.
 - Current upstream side-panel option queries and persisted destinations work
   through the Firefox adapter. Controlled-tab request headers use Firefox's
   native DNR API; the extension adds its required permission. The adapter
@@ -67,7 +72,12 @@ The full-extension smoke test blocks native messaging and renders real packaged
 composer components at 260, 320, 384, 438 and 600 CSS pixels. It tests background
 startup, actual controlled-tab DNR rule installation/removal, visible action
 geometry, a 20px browser font default with the UI retaining its 16px rem baseline, and the
-sidebar's disconnected startup surface. It does **not** exercise an authenticated
+sidebar's disconnected startup surface. The font regression was reproduced in a
+clean profile and fails against the preceding build with `Composer font override`
+(16px rendered versus the 13px token). The patched build renders 13px controls
+and preserves 12/13/14px utilities and medium weight with 16px and 20px browser
+font defaults. No user browser preferences or installed add-on files are changed.
+It does **not** exercise an authenticated
 ChatGPT conversation. Testing that final integration needs the user's temporary
 load and an actual run.
 
@@ -97,6 +107,6 @@ undefined agent variables. These are not established Firefox defects, and this
 fork doesn't claim to repair them. The audit contains no published raw logs,
 conversation text, personal filenames, account identifiers, or URLs.
 
-The two modifications to minified upstream assets are reproducible with
+The modifications to minified upstream assets are reproducible with
 `node scripts/apply-upstream-patches.mjs`; the script is idempotent and rejects
 changed upstream call sites rather than silently patching the wrong code.

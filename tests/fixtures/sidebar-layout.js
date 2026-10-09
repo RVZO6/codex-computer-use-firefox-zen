@@ -13,8 +13,11 @@ const model=h('span',{className:'_ModelPickerTriggerContent_15uud_1'},h('span',{
   h('span',{className:'_ModelPickerTriggerModelLabel_15uud_40'},h('span',{className:'_ModelPickerTriggerModelText_15uud_41'},'GPT 6.1 Sol')),
   h('span',{className:'_ModelPickerTriggerEffortLabel_15uud_54'},'Medium')));
 client().createRoot(document.getElementById('root')).render(h(ObserverContext.Provider,{value:createObserver()},h('main',{className:'fixture'},
+  h('div',{id:'font-size-probes',style:{display:'none'}},
+    ...['xs','sm','base'].map(size=>h('button',{className:`text-${size} font-medium`,'data-font-probe':size},size)),
+    h('textarea',{className:'text-base','data-font-probe':'textarea'})),
   h('header',null,'Sidebar layout test'),h('div',{className:'empty'},'Packaged UI components'),
-  h('section',{className:'composer'},h('div',{className:'input',contentEditable:true,'aria-label':'Do anything'},'Do anything'),
+  h('section',{className:'composer _ComposerLayoutRoot_kbwao_2','data-composer-radius-variant':'default','data-composer-surface-variant':'default'},h('div',{className:'input',contentEditable:true,'aria-label':'Do anything'},'Do anything'),
     h(Footer,null,h('div',{className:'footer'},
       h('div',{className:'control-row'},
         h(Button,{size:'composer',color:'ghost',uniform:true,'aria-label':'Add files and more'},icon('M12 4v16M4 12h16')),
