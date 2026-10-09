@@ -20,3 +20,9 @@ assert.ok(upstreamImportIndex > handshakeIndex, "Upstream sidebar must load only
 assert.match(bootstrap, /getViews\?\.\(\{ type: "sidebar" \}\)\?\.includes\(window\)/u);
 
 console.log(JSON.stringify({ ok: true, hostAccessBeforeSidebarBoot: true, nativeSidebarIdentity: true, firefoxTabMentionsBeforeUpstreamBoot: true, sidebarReadyBeforeUpstreamBoot: true }, null, 2));
+
+const typography = fs.readFileSync("extension/codex-sidepanel/firefox-sidebar-typography.css", "utf8");
+assert.ok(html.indexOf("@layer properties, theme, base, components, utilities") < html.indexOf('rel="modulepreload"'), "Declare typography layers before dependency styles.");
+assert.ok(html.includes("firefox-sidebar-typography.css"));
+assert.match(typography, /font-size:\s*16px/u);
+assert.match(typography, /font:\s*revert-layer/u);
