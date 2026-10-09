@@ -922,6 +922,12 @@
               if (label?.trim()) return label;
               if (element.labels?.length) return [...element.labels].map(label => roleText(label, true)).join(" ");
               if (["IMG", "INPUT"].includes(element.tagName) && element.hasAttribute("alt")) return element.getAttribute("alt");
+              if (element.tagName === "INPUT" && ["button", "submit", "reset"].includes(element.type)) {
+                if (element.value) return element.value;
+                if (!element.hasAttribute("value") && element.type !== "button") {
+                  return element.type === "submit" ? "Submit" : "Reset";
+                }
+              }
               return roleText(element, includeHidden) || element.getAttribute?.("title") || element.getAttribute?.("placeholder") || "";
             };
             const hiddenForRole = (element) => {

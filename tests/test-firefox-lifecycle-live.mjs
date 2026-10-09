@@ -62,7 +62,7 @@ const server = http.createServer((req, res) => {
     res.setHeader("content-type", "text/html");
     res.setHeader("Content-Security-Policy", "default-src 'self'; script-src 'self'; object-src 'none'");
     res.end(
-      "<!doctype html><title>Lifecycle fixture</title><link rel='stylesheet' href='/fixture.css'><p>isolated lifecycle test</p><button>Save<span hidden>draft</span></button><a href='/home'><img alt='Home'></a><iframe id='role-frame' src='/role-frame'></iframe><label id='shared-label'>Shared accessible label</label><button aria-labelledby='shared-label'>Labeled button</button><iframe src='/child' title='Child frame'></iframe><input aria-label='Repository search'><button>Search</button><a id='charger' href='/charger'><h2 aria-label='UGREEN Nexode 65W'>UGREEN Nexode 65W charger</h2></a><h6>Other charger</h6><h2 aria-hidden='true'>Hidden charger</h2><textarea aria-label='Read-only editor' readonly>do not change</textarea><div class='editor'><textarea aria-label='Code editor'>old blueprint</textarea><div class='overlay'>Editor overlay</div></div>",
+      "<!doctype html><title>Lifecycle fixture</title><link rel='stylesheet' href='/fixture.css'><p>isolated lifecycle test</p><button>Save<span hidden>draft</span></button><input type='button' value='Native button'><input type='submit' value='Native submit'><input type='reset' value='Native reset'><input type='submit'><input type='reset'><a href='/home'><img alt='Home'></a><iframe id='role-frame' src='/role-frame'></iframe><label id='shared-label'>Shared accessible label</label><button aria-labelledby='shared-label'>Labeled button</button><iframe src='/child' title='Child frame'></iframe><input aria-label='Repository search'><button>Search</button><a id='charger' href='/charger'><h2 aria-label='UGREEN Nexode 65W'>UGREEN Nexode 65W charger</h2></a><h6>Other charger</h6><h2 aria-hidden='true'>Hidden charger</h2><textarea aria-label='Read-only editor' readonly>do not change</textarea><div class='editor'><textarea aria-label='Code editor'>old blueprint</textarea><div class='overlay'>Editor overlay</div></div>",
     );
   }
 });
@@ -128,6 +128,11 @@ const selectorChecks=await browser.scripting.executeScript({target:{tabId:target
  const helper=globalThis.__codexPlaywrightInjected;
  const count=selector=>helper.querySelectorAll(helper.parseSelector(selector),document).length;
  return {
+  nativeButton:count('internal:role=button[name="Native button"s]'),
+  nativeSubmit:count('internal:role=button[name="Native submit"s]'),
+  nativeReset:count('internal:role=button[name="Native reset"s]'),
+  defaultSubmit:count('internal:role=button[name="Submit"s]'),
+  defaultReset:count('internal:role=button[name="Reset"s]'),
   hiddenFrame:count('iframe#role-frame >> internal:control=enter-frame >> internal:role=button[name="Frame Save"s]'),
   save:count('internal:role=button[name="Save"s]'),
   wrongSave:count('internal:role=button[name="Savedraft"s]'),
@@ -136,7 +141,7 @@ const selectorChecks=await browser.scripting.executeScript({target:{tabId:target
  };
 }});
 const counts=selectorChecks[0]?.result;
-if(!counts||counts.hiddenFrame!==1||counts.save!==1||counts.wrongSave!==0||counts.home!==1||counts.textFilter!==1)throw Error('Role-name/frame regression: '+JSON.stringify(counts));
+if(!counts||['nativeButton','nativeSubmit','nativeReset','defaultSubmit','defaultReset'].some(key=>counts[key]!==1)||counts.hiddenFrame!==1||counts.save!==1||counts.wrongSave!==0||counts.home!==1||counts.textFilter!==1)throw Error('Role-name/frame regression: '+JSON.stringify(counts));
 const ax=await chrome.debugger.sendCommand(debuggee,'Accessibility.getFullAXTree',{});
 const input=ax.nodes.find(n=>n.name?.value==='Repository search');
 if(!input)throw Error('Search input missing from AX tree');
