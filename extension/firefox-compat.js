@@ -910,12 +910,23 @@
           ? document.documentElement
           : (state.nodes.get(payload.rootBackendNodeId) ?? document.documentElement);
         const excludedTags = new Set(["HEAD", "SCRIPT", "STYLE", "TEMPLATE", "NOSCRIPT"]);
-        const hidden = (element) => {
+        const prunesSubtree = (element) => {
           if (excludedTags.has(element.tagName) || element.hidden || element.inert
             || element.getAttribute?.("aria-hidden") === "true"
             || (element.tagName === "INPUT" && element.type === "hidden")) return true;
           const style = getComputedStyle(element);
-          return style.display === "none" || ["hidden", "collapse"].includes(style.visibility);
+          return style.display === "none";
+        };
+        const visible = (element) => !["hidden", "collapse"].includes(getComputedStyle(element).visibility);
+        // Use the composed tree: assigned content replaces slot fallback, and
+        // a shadow host's light children are reached through its slots only.
+        const childrenFor = (node) => {
+          if (node.shadowRoot) return [...node.shadowRoot.childNodes];
+          if (node.tagName === "SLOT") {
+            const assigned = node.assignedNodes?.({ flatten: true });
+            if (assigned?.length) return [...assigned];
+          }
+          return [...(node.childNodes ?? [])];
         };
         const roleFor = (element) => {
           const explicit = element.getAttribute?.("role")?.trim().split(/\s+/u)[0];
@@ -937,11 +948,12 @@
         // Read rendered descendants only for roles whose names come from content.
         // Generic ancestors used to duplicate entire documents (including scripts)
         // in both name and value, making snapshots quadratic in page depth.
-        const textFor = (node, includeHidden = false) => {
-          if (node.nodeType === Node.TEXT_NODE) return node.nodeValue ?? "";
-          if (node instanceof Element && (excludedTags.has(node.tagName) || (!includeHidden && hidden(node)))) return "";
-          return [...(node.childNodes ?? []), ...(node.shadowRoot?.childNodes ?? [])]
-            .map((child) => textFor(child, includeHidden)).join(" ");
+        const textFor = (node, includeHidden = false, parentVisible = true) => {
+          if (node.nodeType === Node.TEXT_NODE) return includeHidden || parentVisible ? node.nodeValue ?? "" : "";
+          if (node instanceof Element && (excludedTags.has(node.tagName) || (!includeHidden && prunesSubtree(node)))) return "";
+          const nodeVisible = !(node instanceof Element) || visible(node);
+          // Visibility can be restored by descendants, so keep descending.
+          return childrenFor(node).map(child => textFor(child, includeHidden, nodeVisible)).join("");
         };
         const normalize = (text) => String(text ?? "").replace(/\s+/gu, " ").trim();
         const contentNamedRoles = new Set(["button", "link", "heading", "option", "tab", "menuitem", "checkbox", "radio", "switch", "cell", "columnheader", "rowheader"]);
@@ -959,11 +971,15 @@
             || (contentNamedRoles.has(role) ? textFor(element) : ""));
         };
         const nodes = [];
-        const visit = (node, parentId) => {
+        const visit = (node, parentId, parentVisible = true) => {
           const isText = node.nodeType === Node.TEXT_NODE;
-          if (!isText && (!(node instanceof Element) || hidden(node))) return null;
+          if (isText && !parentVisible) return [];
+          if (!isText && (!(node instanceof Element) || prunesSubtree(node))) return [];
+          if (!isText && !visible(node)) {
+            return childrenFor(node).flatMap(child => visit(child, parentId, false));
+          }
           const name = isText ? normalize(node.nodeValue) : nameFor(node, roleFor(node));
-          if (isText && !name) return null;
+          if (isText && !name) return [];
           const backendDOMNodeId = nodeId(node);
           const id = `firefox-ax-${backendDOMNodeId}`;
           const role = isText ? "StaticText" : roleFor(node);
@@ -990,11 +1006,10 @@
             if (role === "heading") entry.properties.push({ name: "level", value: { type: "integer", value: Number(node.getAttribute("aria-level") ?? node.tagName.slice(1)) } });
           }
           nodes.push(entry);
-          for (const child of [...(node.childNodes ?? []), ...(node.shadowRoot?.childNodes ?? [])]) {
-            const childId = visit(child, id);
-            if (childId) entry.childIds.push(childId);
+          for (const child of childrenFor(node)) {
+            entry.childIds.push(...visit(child, id));
           }
-          return id;
+          return [id];
         };
         visit(root, null);
         return { nodes };
