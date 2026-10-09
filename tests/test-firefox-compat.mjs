@@ -912,6 +912,69 @@ assert.equal(
 strictCspControlCandidates.pop();
 
 const dynamicEvaluationAttemptsBeforeHelperFallback = strictCspDynamicEvaluationAttempts;
+// Exercise the exact selector chains emitted by Browser Use on Amazon. These
+// tests run the installed static helper in a realm that forbids string eval.
+const productName = "UGREEN Nexode 65W USB C Charger Block, 3 Port GaN Foldable Fast Charging";
+const productHeading = new StrictCspHtmlElement();
+productHeading.tagName = "H2";
+productHeading.textContent = productName;
+productHeading.attributeValues.set("aria-label", productName);
+const productLink = new StrictCspHtmlElement();
+productLink.tagName = "A";
+productLink.attributeValues.set("href", "/product");
+productLink.textContent = productName;
+productHeading.parentElement = productLink;
+const otherHeading = new StrictCspHtmlElement();
+otherHeading.tagName = "H6";
+otherHeading.textContent = "Another charger";
+const originalSelectorQuery = strictCspDocument.querySelectorAll;
+strictCspDocument.querySelectorAll = (selector) => {
+  if (selector === "*") return [productLink, productHeading, otherHeading];
+  if (selector === "a[href]") return [productLink];
+  return originalSelectorQuery(selector);
+};
+const helperQuery = (selector) => reinstalledPlaywrightHelper.querySelectorAll(
+  reinstalledPlaywrightHelper.parseSelector(selector), strictCspDocument,
+);
+assert.strictEqual(helperQuery(`internal:role=heading[name=${JSON.stringify(productName)}s] >> nth=0`)[0], productHeading);
+assert.equal(helperQuery('internal:role=heading[name="ugreen"i]').length, 1);
+assert.equal(helperQuery('internal:role=heading[name="ugreen"s]').length, 0, "Exact role names must preserve case and reject substrings.");
+assert.strictEqual(helperQuery('internal:role=heading[level=6]')[0], otherHeading, "All six native heading levels must be recognized.");
+assert.strictEqual(helperQuery('a[href] >> internal:has-text="UGREEN Nexode 65W"i')[0], productLink);
+assert.equal(helperQuery('a[href] >> internal:has-text="missing"i').length, 0);
+assert.equal(helperQuery('a[href] >> internal:has-not-text="UGREEN"i').length, 0);
+assert.equal(helperQuery('a[href] >> internal:has-text="ugreen"s').length, 0);
+assert.equal(helperQuery('a[href] >> internal:has-text="UGREEN"s').length, 1, "hasText exact:true is still a case-sensitive substring filter.");
+assert.equal(helperQuery('a[href] >> internal:has-text=/ugreen\\s+nexode/i').length, 1);
+productHeading.attributeValues.set("aria-label", 'A "quoted" >> charger');
+assert.strictEqual(helperQuery(`internal:role=heading[name=${JSON.stringify('A "quoted" >> charger')}s] >> nth=0`)[0], productHeading, "Quoted chain delimiters must remain part of the name.");
+assert.equal(helperQuery('internal:role=heading[name=/quoted.*charger/i]').length, 1);
+productHeading.attributeValues.set("aria-hidden", "true");
+assert.equal(helperQuery('internal:role=heading[name=/quoted/]').length, 0, "Hidden role targets must be excluded by default.");
+assert.equal(helperQuery('internal:role=heading[name=/quoted/][include-hidden=true]').length, 1);
+productHeading.attributeValues.delete("aria-hidden");
+productHeading.attributeValues.delete("aria-label");
+productHeading.attributeValues.set("aria-labelledby", "product-label");
+strictCspDocument.getElementById = (id) => id === "product-label" ? { textContent: "  Named   charger  " } : null;
+assert.equal(helperQuery('internal:role=heading[name="Named charger"s]').length, 1);
+productLink.attributeValues.set("aria-hidden", "true");
+assert.equal(helperQuery('internal:role=heading[name="Named charger"s]').length, 0, "Hidden ancestors must hide a role target too.");
+productLink.attributeValues.delete("aria-hidden");
+productLink.shadowRoot = {
+  textContent: "Shadow charger",
+  querySelectorAll: (selector) => selector === "*" ? [otherHeading] : [],
+};
+assert.equal(helperQuery('a[href] >> internal:has-text="Shadow charger"i').length, 1, "Text filters must include open shadow-root content.");
+assert.strictEqual(reinstalledPlaywrightHelper.querySelectorAll(
+  reinstalledPlaywrightHelper.parseSelector('internal:role=heading[name="Another charger"s]'), productLink,
+)[0], otherHeading, "A scoped locator must search the scope's own shadow root.");
+productLink.shadowRoot = null;
+assert.throws(() => helperQuery('internal:role=heading[selected=true]'), /Unsupported Firefox Playwright role attribute/u, "Unimplemented role options must not silently select the wrong element.");
+assert.equal(strictCspDynamicEvaluationAttempts, dynamicEvaluationAttemptsBeforeHelperFallback, "Selector support must not introduce dynamic eval under strict CSP.");
+strictCspDocument.querySelectorAll = originalSelectorQuery;
+delete strictCspDocument.getElementById;
+
+
 await assert.rejects(
   compat.debugger.sendCommand({ tabId: 1 }, "Runtime.evaluate", {
     expression: unrecognizedPlaywrightHelperExpression,
