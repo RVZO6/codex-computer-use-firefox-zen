@@ -63,6 +63,7 @@ class StrictCspElement {}
 class StrictCspHtmlElement extends StrictCspElement {
   constructor() {
     super();
+    this.nodeType = 1;
     this.attributeValues = new Map();
     this.attributes = [];
     this.childNodes = [];
@@ -208,13 +209,13 @@ const strictCspPage = {
   ClipboardEvent: undefined,
   DataTransfer: undefined,
   getComputedStyle: (element) => ({
-    display: "block",
+    display: element.testDisplay ?? "block",
     opacity: "1",
     overflow: element instanceof StrictCspScrollElement ? "auto" : "visible",
     overflowX: element instanceof StrictCspScrollElement ? "auto" : "visible",
     overflowY: element instanceof StrictCspScrollElement ? "auto" : "visible",
     pointerEvents: "auto",
-    visibility: "visible",
+    visibility: element.testVisibility ?? "visible",
   }),
   innerHeight: 800,
   innerWidth: 1200,
@@ -971,6 +972,59 @@ assert.strictEqual(reinstalledPlaywrightHelper.querySelectorAll(
 productLink.shadowRoot = null;
 assert.throws(() => helperQuery('internal:role=heading[selected=true]'), /Unsupported Firefox Playwright role attribute/u, "Unimplemented role options must not silently select the wrong element.");
 assert.equal(strictCspDynamicEvaluationAttempts, dynamicEvaluationAttemptsBeforeHelperFallback, "Selector support must not introduce dynamic eval under strict CSP.");
+// These nodes deliberately belong to another realm: instanceof the parent
+// Element would skip all ancestor checks after enter-frame.
+class ForeignElement {
+  constructor(tagName, attributes = {}, parentElement = null) {
+    this.nodeType = 1;
+    this.tagName = tagName;
+    this.attributes = attributes;
+    this.parentElement = parentElement;
+    this.childNodes = [];
+    this.textContent = "";
+  }
+  getAttribute(name) { return this.attributes[name] ?? null; }
+  hasAttribute(name) { return name in this.attributes; }
+}
+const frameButtons = ["aria-hidden", "hidden", "display", "visible"].map(kind => {
+  const parent = new ForeignElement("DIV", kind === "aria-hidden" ? { "aria-hidden": "true" } : {});
+  parent.hidden = kind === "hidden";
+  parent.testDisplay = kind === "display" ? "none" : "block";
+  const button = new ForeignElement("BUTTON", {}, parent);
+  button.textContent = "Save";
+  return button;
+});
+const frameDocument = { querySelectorAll: selector => selector === "*" ? frameButtons : [],
+  defaultView: { getComputedStyle: strictCspPage.getComputedStyle } };
+for (const button of frameButtons) {
+  button.ownerDocument = frameDocument;
+  button.parentElement.ownerDocument = frameDocument;
+}
+const frame = new StrictCspFrameElement();
+frame.contentDocument = frameDocument;
+strictCspDocument.querySelectorAll = selector => selector === "iframe" ? [frame] : [];
+assert.deepEqual(
+  [...helperQuery('iframe >> internal:control=enter-frame >> internal:role=button[name="Save"s]')],
+  [frameButtons[3]],
+  "Frame locators must exclude every hidden ancestor, regardless of Element realm.",
+);
+assert.equal(helperQuery('iframe >> internal:control=enter-frame >> internal:role=button[name="Save"s][include-hidden=true]').length, 4);
+
+const hiddenChild = new ForeignElement("SPAN");
+hiddenChild.hidden = true;
+hiddenChild.textContent = "draft";
+const saveButton = new StrictCspButtonElement();
+saveButton.childNodes = [{ nodeType: 3, nodeValue: "Save" }, hiddenChild];
+const homeLink = new StrictCspHtmlElement();
+homeLink.tagName = "A";
+homeLink.attributeValues.set("href", "/");
+homeLink.childNodes = [new ForeignElement("IMG", { alt: "Home" })];
+strictCspDocument.querySelectorAll = selector => selector === "*" ? [saveButton, homeLink] : [];
+assert.strictEqual(helperQuery('internal:role=button[name="Save"s]')[0], saveButton);
+assert.equal(helperQuery('internal:role=button[name="Savedraft"s]').length, 0);
+assert.strictEqual(helperQuery('internal:role=link[name="Home"s]')[0], homeLink);
+assert.strictEqual(helperQuery('internal:role=button >> internal:has-text="Savedraft"s')[0], saveButton,
+  "Text filters keep their separate, hidden-inclusive text semantics.");
 strictCspDocument.querySelectorAll = originalSelectorQuery;
 delete strictCspDocument.getElementById;
 

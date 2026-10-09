@@ -893,27 +893,45 @@
               if (element.tagName === "SELECT") return element.multiple || element.size > 1 ? "listbox" : "combobox";
               return ({ BUTTON: "button", TEXTAREA: "textbox", IMG: "img", MAIN: "main", NAV: "navigation" })[element.tagName] ?? null;
             };
-            const nameFor = (element) => {
+            // Role names use rendered content, unlike text filters, which may
+            // include hidden text. Image alternatives contribute to names too.
+            const roleText = (node, includeHidden = false) => {
+              if (node.nodeType === Node.TEXT_NODE) return node.nodeValue ?? "";
+              if (["SCRIPT", "STYLE", "HEAD"].includes(node.tagName)) return "";
+              if (!includeHidden && node.nodeType === Node.ELEMENT_NODE && hiddenForRole(node)) return "";
+              const label = node.getAttribute?.("aria-label");
+              if (label?.trim()) return label;
+              if (node.tagName === "IMG" || (node.tagName === "INPUT" && node.type === "image")) {
+                return node.getAttribute?.("alt") ?? "";
+              }
+              if (node.shadowRoot) return roleText(node.shadowRoot, includeHidden);
+              const assigned = node.tagName === "SLOT" ? node.assignedNodes?.({ flatten: true }) : null;
+              const children = assigned?.length ? assigned : node.childNodes;
+              return children?.length
+                ? [...children].map(child => roleText(child, includeHidden)).join("")
+                : node.textContent ?? "";
+            };
+            const nameFor = (element, includeHidden = false) => {
               const labelledBy = element.getAttribute?.("aria-labelledby");
               if (labelledBy) {
                 const labels = labelledBy.trim().split(/\s+/u).map((id) => element.ownerDocument?.getElementById(id)
                   ?? document.getElementById?.(id)).filter(Boolean);
-                if (labels.length) return labels.map(elementText).join(" ");
+                if (labels.length) return labels.map(label => roleText(label, true)).join(" ");
               }
               const label = element.getAttribute?.("aria-label");
               if (label?.trim()) return label;
-              if (element.labels?.length) return [...element.labels].map(elementText).join(" ");
+              if (element.labels?.length) return [...element.labels].map(label => roleText(label, true)).join(" ");
               if (["IMG", "INPUT"].includes(element.tagName) && element.hasAttribute("alt")) return element.getAttribute("alt");
-              return elementText(element) || element.getAttribute?.("title") || element.getAttribute?.("placeholder") || "";
+              return roleText(element, includeHidden) || element.getAttribute?.("title") || element.getAttribute?.("placeholder") || "";
             };
             const hiddenForRole = (element) => {
-              for (let ancestor = element; ancestor instanceof Element;
+              for (let ancestor = element; ancestor?.nodeType === Node.ELEMENT_NODE;
                 ancestor = ancestor.parentElement ?? ancestor.getRootNode?.()?.host) {
-                const style = getComputedStyle(ancestor);
+                const style = (ancestor.ownerDocument?.defaultView?.getComputedStyle ?? getComputedStyle)(ancestor);
                 if (ancestor.hidden || ancestor.getAttribute("aria-hidden") === "true"
                   || style.display === "none") return true;
               }
-              return ["hidden", "collapse"].includes(getComputedStyle(element).visibility);
+              return ["hidden", "collapse"].includes((element.ownerDocument?.defaultView?.getComputedStyle ?? getComputedStyle)(element).visibility);
             };
             const roleOptions = (body) => {
               const role = /^([\w-]+)/u.exec(body);
@@ -957,7 +975,7 @@
                     if (roleFor(element) !== options.role || (!options.includeHidden && hiddenForRole(element))) return false;
                     if (options.level != null && Number(element.getAttribute("aria-level")
                       ?? element.tagName.slice(1)) !== options.level) return false;
-                    return options.name == null || matchesText(normalizeText(nameFor(element)), options.name, true);
+                    return options.name == null || matchesText(normalizeText(nameFor(element, options.includeHidden)), options.name, true);
                   }));
                 } else if (part.name === "internal:label") {
                   const labelMatcher = textBody(part.body);

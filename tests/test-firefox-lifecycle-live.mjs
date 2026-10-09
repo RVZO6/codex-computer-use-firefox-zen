@@ -48,14 +48,21 @@ const server = http.createServer((req, res) => {
   } else if (req.url === "/child") {
     res.setHeader("content-type", "text/html");
     res.end("<!doctype html><title>Frame fixture</title><button>Frame button</button>");
+  } else if (req.url === "/role-frame") {
+    res.setHeader("content-type", "text/html");
+    res.end(`<link rel="stylesheet" href="/fixture.css">
+      <div aria-hidden="true"><button>Frame Save</button></div>
+      <div hidden><button>Frame Save</button></div>
+      <div class="role-hidden"><button>Frame Save</button></div>
+      <button>Frame Save</button>`);
   } else if (req.url === "/fixture.css") {
     res.setHeader("content-type", "text/css");
-    res.end(".editor {position:relative;margin-top:200vh}.overlay {position:absolute;inset:0;background:white}");
+    res.end(".role-hidden {display:none}.editor {position:relative;margin-top:200vh}.overlay {position:absolute;inset:0;background:white}");
   } else {
     res.setHeader("content-type", "text/html");
     res.setHeader("Content-Security-Policy", "default-src 'self'; script-src 'self'; object-src 'none'");
     res.end(
-      "<!doctype html><title>Lifecycle fixture</title><link rel='stylesheet' href='/fixture.css'><p>isolated lifecycle test</p><label id='shared-label'>Shared accessible label</label><button aria-labelledby='shared-label'>Labeled button</button><iframe src='/child' title='Child frame'></iframe><input aria-label='Repository search'><button>Search</button><a id='charger' href='/charger'><h2 aria-label='UGREEN Nexode 65W'>UGREEN Nexode 65W charger</h2></a><h6>Other charger</h6><h2 aria-hidden='true'>Hidden charger</h2><textarea aria-label='Read-only editor' readonly>do not change</textarea><div class='editor'><textarea aria-label='Code editor'>old blueprint</textarea><div class='overlay'>Editor overlay</div></div>",
+      "<!doctype html><title>Lifecycle fixture</title><link rel='stylesheet' href='/fixture.css'><p>isolated lifecycle test</p><button>Save<span hidden>draft</span></button><a href='/home'><img alt='Home'></a><iframe id='role-frame' src='/role-frame'></iframe><label id='shared-label'>Shared accessible label</label><button aria-labelledby='shared-label'>Labeled button</button><iframe src='/child' title='Child frame'></iframe><input aria-label='Repository search'><button>Search</button><a id='charger' href='/charger'><h2 aria-label='UGREEN Nexode 65W'>UGREEN Nexode 65W charger</h2></a><h6>Other charger</h6><h2 aria-hidden='true'>Hidden charger</h2><textarea aria-label='Read-only editor' readonly>do not change</textarea><div class='editor'><textarea aria-label='Code editor'>old blueprint</textarea><div class='overlay'>Editor overlay</div></div>",
     );
   }
 });
@@ -111,12 +118,25 @@ const selectorResults=await browser.scripting.executeScript({target:{tabId:targe
  if(query('internal:role=heading[name="Hidden charger"s]').length!==0)throw Error('Hidden role leaked');
  if(query('internal:role=heading[name="Hidden charger"s][include-hidden=true]').length!==1)throw Error('includeHidden failed');
  if(query('a[href] >> internal:has-text=/ugreen/i').length!==1)throw Error('Regexp hasText failed');
- if(query('a[href] >> internal:has-not-text="UGREEN"i').length!==0)throw Error('hasNotText failed');
+ if(query('a#charger >> internal:has-not-text="UGREEN"i').length!==0)throw Error('hasNotText failed');
  const frame=query('iframe >> internal:control=enter-frame >> internal:role=button[name="Frame button"s]');
  if(frame.length!==1)throw Error('Same-origin frame selector failed');
  return true;
 }});
 if(selectorResults[0]?.result!==true)throw Error('Static selector regression failed: '+JSON.stringify(selectorResults));
+const selectorChecks=await browser.scripting.executeScript({target:{tabId:target.id},world:'MAIN',func:()=>{
+ const helper=globalThis.__codexPlaywrightInjected;
+ const count=selector=>helper.querySelectorAll(helper.parseSelector(selector),document).length;
+ return {
+  hiddenFrame:count('iframe#role-frame >> internal:control=enter-frame >> internal:role=button[name="Frame Save"s]'),
+  save:count('internal:role=button[name="Save"s]'),
+  wrongSave:count('internal:role=button[name="Savedraft"s]'),
+  home:count('internal:role=link[name="Home"s]'),
+  textFilter:count('internal:role=button[name="Save"s] >> internal:has-text="Savedraft"s'),
+ };
+}});
+const counts=selectorChecks[0]?.result;
+if(!counts||counts.hiddenFrame!==1||counts.save!==1||counts.wrongSave!==0||counts.home!==1||counts.textFilter!==1)throw Error('Role-name/frame regression: '+JSON.stringify(counts));
 const ax=await chrome.debugger.sendCommand(debuggee,'Accessibility.getFullAXTree',{});
 const input=ax.nodes.find(n=>n.name?.value==='Repository search');
 if(!input)throw Error('Search input missing from AX tree');
