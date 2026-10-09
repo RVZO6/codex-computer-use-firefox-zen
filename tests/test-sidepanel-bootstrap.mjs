@@ -22,7 +22,13 @@ assert.match(bootstrap, /getViews\?\.\(\{ type: "sidebar" \}\)\?\.includes\(wind
 console.log(JSON.stringify({ ok: true, hostAccessBeforeSidebarBoot: true, nativeSidebarIdentity: true, firefoxTabMentionsBeforeUpstreamBoot: true, sidebarReadyBeforeUpstreamBoot: true }, null, 2));
 
 const typography = fs.readFileSync("extension/codex-sidepanel/firefox-sidebar-typography.css", "utf8");
-assert.ok(html.indexOf("@layer properties, theme, base, components, utilities") < html.indexOf('rel="modulepreload"'), "Declare typography layers before dependency styles.");
+const layerOrderIndex = html.indexOf("@layer properties, theme, base, components, utilities");
+const modulepreloadIndex = html.indexOf('rel="modulepreload"');
+assert.ok(layerOrderIndex >= 0, "Declare typography layers.");
+assert.ok(modulepreloadIndex >= 0, "Dependency modulepreloads must exist.");
+assert.ok(layerOrderIndex < modulepreloadIndex, "Declare typography layers before dependency styles.");
 assert.ok(html.includes("firefox-sidebar-typography.css"));
 assert.match(typography, /font-size:\s*16px/u);
 assert.match(typography, /font:\s*revert-layer/u);
+
+assert.match(typography, /:where\(html\[data-codex-window-type="chrome-extension"\]\) :is\(button, textarea\)/u);
