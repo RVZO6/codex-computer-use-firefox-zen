@@ -6,6 +6,8 @@ import {spawn} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 const root=path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 if(!process.env.FIREFOX_BINARY||!process.env.npm_execpath)throw Error('Run with FIREFOX_BINARY=... npm run test:extension:live');
+const browserFont=Number(process.env.TEST_BROWSER_DEFAULT_FONT_SIZE||20);
+if(!Number.isInteger(browserFont)||browserFont<9||browserFont>48)throw Error('Invalid browser font size');
 const dir=fs.mkdtempSync(path.join(os.tmpdir(),'zen-full-extension-test-'));
 fs.cpSync(path.join(root,'extension'),dir,{recursive:true});
 const manifest=JSON.parse(fs.readFileSync(path.join(dir,'manifest.json')));
@@ -21,9 +23,10 @@ for(const name of ['sidebar-layout.html','sidebar-layout.js','sidebar-layout.css
 fs.appendFileSync(path.join(dir,'codex-sidepanel/sidebar-layout.js'),`\n
 function report(){
  if(!document.querySelector('[aria-label="Send"]'))return false;
- const boxes=[...document.querySelectorAll('button')].map(el=>{const r=el.getBoundingClientRect();return {label:el.getAttribute('aria-label'),left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width}});
+ const boxes=[...document.querySelectorAll('.footer button')].map(el=>{const r=el.getBoundingClientRect();return {label:el.getAttribute('aria-label'),left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width,fontSize:getComputedStyle(el).fontSize,fontToken:getComputedStyle(el).getPropertyValue('--text-button-composer'),textSm:getComputedStyle(el).getPropertyValue('--text-sm')}});
+ const fontProbes=[...document.querySelectorAll('[data-font-probe]')].map(el=>({name:el.dataset.fontProbe,size:getComputedStyle(el).fontSize,weight:getComputedStyle(el).fontWeight}));
  const effort=document.querySelector('[class*="_ModelPickerTriggerEffortLabel_"]');
- parent.postMessage({type:'layout-result',width:innerWidth,height:innerHeight,fontSize:getComputedStyle(document.documentElement).fontSize,scrollWidth:document.documentElement.scrollWidth,effortVisible:getComputedStyle(effort).display!=='none',boxes},'*');return true;
+ parent.postMessage({type:'layout-result',width:innerWidth,height:innerHeight,fontSize:getComputedStyle(document.documentElement).fontSize,scrollWidth:document.documentElement.scrollWidth,effortVisible:getComputedStyle(effort).display!=='none',fontProbes,boxes},'*');return true;
 }
 const observer=new MutationObserver(()=>{if(report())observer.disconnect()});observer.observe(document.getElementById('root'),{childList:true,subtree:true});
 requestAnimationFrame(report);
@@ -83,6 +86,10 @@ fs.writeFileSync(path.join(dir,'test-probe.js'),`
     for(const result of message.results){
      if(result.fontSize!=='16px'||result.scrollWidth>result.width)throw Error('Root scaling/overflow: '+JSON.stringify(result));
      if(result.boxes.length!==5)throw Error('Missing composer action');
+     for(const box of result.boxes)if(box.fontSize!==box.textSm)throw Error('Composer font override: '+JSON.stringify(box));
+     if(result.fontProbes.length!==4)throw Error('Missing typography probes');
+     const expectedFonts={xs:'12px',sm:'13px',base:'14px',textarea:'14px'};
+     for(const probe of result.fontProbes)if(probe.size!==expectedFonts[probe.name]||(probe.name!=='textarea'&&probe.weight!=='500'))throw Error('Typography utility override: '+JSON.stringify(probe));
      const ordered=[...result.boxes].sort((a,b)=>a.left-b.left);
      for(let i=0;i<ordered.length;i++){
       const box=ordered[i];
@@ -100,12 +107,12 @@ fs.writeFileSync(path.join(dir,'test-probe.js'),`
     if(!smokeMenuTitles.includes('Ask ChatGPT'))throw Error('Upstream context menu not registered: '+JSON.stringify(smokeMenuTitles));
     const errors=smokeErrors.filter(e=>/is not a function|SyntaxError|ReferenceError|TypeError|before initialization/.test(e));
     if(errors.length)throw Error('Full background startup failed: '+errors.join(' | '));
-    await fetch(${JSON.stringify(url+'/result')},{method:'POST',body:JSON.stringify({ok:true,fullBackgroundBoot:true,sidebarEntryRendered:true,nativeDnr:true,controlledTabHeaderRules:true,customBrowserFont:20,layoutResults:message.results})});
+    await fetch(${JSON.stringify(url+'/result')},{method:'POST',body:JSON.stringify({ok:true,fullBackgroundBoot:true,sidebarEntryRendered:true,nativeDnr:true,controlledTabHeaderRules:true,customBrowserFont:${browserFont},layoutResults:message.results})});
    }catch(e){await fetch(${JSON.stringify(url+'/result')},{method:'POST',body:JSON.stringify({ok:false,error:String(e),errors:smokeErrors})});}
   });
  }catch(e){await fetch(${JSON.stringify(url+'/result')},{method:'POST',body:JSON.stringify({ok:false,error:String(e),errors:smokeErrors})});}
 })();`);
-const child=spawn(process.execPath,[process.env.npm_execpath,'exec','--yes','--package=web-ext','--','web-ext','run','--source-dir',dir,'--firefox',process.env.FIREFOX_BINARY,'--no-reload','--args=-headless','--pref=font.size.variable.x-western=20'],{stdio:['ignore','pipe','pipe'],detached:process.platform!=='win32'});
+const child=spawn(process.execPath,[process.env.npm_execpath,'exec','--yes','--package=web-ext','--','web-ext','run','--source-dir',dir,'--firefox',process.env.FIREFOX_BINARY,'--no-reload','--args=-headless',`--pref=font.size.variable.x-western=${browserFont}`],{stdio:['ignore','pipe','pipe'],detached:process.platform!=='win32'});
 let logs='';child.stdout.on('data',x=>logs+=x);child.stderr.on('data',x=>logs+=x);
 child.on('error',e=>finish({ok:false,error:String(e)}));child.on('exit',code=>finish({ok:false,error:'web-ext exited '+code,logs}));
 const timeout=setTimeout(()=>finish({ok:false,error:'Smoke test timed out',logs}),45000);
