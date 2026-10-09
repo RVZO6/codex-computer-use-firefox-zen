@@ -29,8 +29,9 @@ try {
   // Test the script being edited, even before its parent commit is published.
   fs.copyFileSync(path.join(root, "scripts/package-extension.mjs"), path.join(checkout, "scripts/package-extension.mjs"));
   git("add", "scripts/package-extension.mjs");
+  // A disposable fixture must not depend on the contributor's signing key.
   git("-c", "user.name=Packaging regression", "-c", "user.email=packaging@localhost",
-    "commit", "--quiet", "--allow-empty", "-m", "Canonical packaging fixture");
+    "-c", "commit.gpgsign=false", "commit", "--quiet", "--allow-empty", "-m", "Canonical packaging fixture");
   const { version } = JSON.parse(fs.readFileSync(path.join(checkout, "version.json")));
   const stem = `codex-computer-use-firefox-zen-${version}`;
   const build = () => {
