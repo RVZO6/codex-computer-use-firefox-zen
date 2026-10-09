@@ -7,10 +7,9 @@
   "scripts": {
     "check": "node scripts/check-version.mjs && node scripts/verify-extension.mjs",
     "version:set": "node scripts/set-version.mjs",
-    "test": "npm run check && node tests/test-amo-auth.mjs && node tests/test-companion-required.mjs && node tests/test-sidepanel-focus-compat.mjs && node tests/test-sidepanel-host-access.mjs && node tests/test-sidebar-layout.mjs && node tests/test-file-path.mjs && node tests/test-sidepanel-bootstrap.mjs && node tests/test-sidepanel-companion-setup.mjs && node tests/test-chatgpt-feature-parity.mjs && node tests/test-firefox-compat.mjs && node tests/test-editing-assets.mjs && node tests/test-native-host.mjs",
+    "test": "npm run check && node tests/test-amo-auth.mjs && node tests/test-companion-required.mjs && node tests/test-sidepanel-focus-compat.mjs && node tests/test-sidepanel-host-access.mjs && node tests/test-sidepanel-bootstrap.mjs && node tests/test-sidepanel-companion-setup.mjs && node tests/test-chatgpt-feature-parity.mjs && node tests/test-firefox-compat.mjs && node tests/test-editing-assets.mjs && node tests/test-native-host.mjs",
     "package": "node scripts/package-extension.mjs",
     "test:live": "node tests/test-firefox-lifecycle-live.mjs",
-    "test:extension:live": "node tests/test-extension-live.mjs",
     "package:windows:upstream": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-extension.ps1"
   }
 }

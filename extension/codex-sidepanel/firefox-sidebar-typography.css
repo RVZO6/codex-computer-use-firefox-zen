@@ -1,0 +1,8 @@
+/* Chromium rem tokens assume a 16px root; preserve normal page zoom. */
+html[data-codex-window-type="chrome-extension"] { font-size: 16px; }
+
+/* The upstream unlayered font reset outranks Tailwind's typography layers.
+   Revert this reset to those layers so explicit control sizes/weights win. */
+html[data-codex-window-type="chrome-extension"] :is(button, textarea) {
+  font: revert-layer;
+}
