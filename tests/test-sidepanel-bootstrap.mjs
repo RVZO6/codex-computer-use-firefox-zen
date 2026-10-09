@@ -20,3 +20,9 @@ assert.ok(upstreamImportIndex > handshakeIndex, "Upstream sidebar must load only
 assert.match(bootstrap, /getViews\?\.\(\{ type: "sidebar" \}\)\?\.includes\(window\)/u);
 
 console.log(JSON.stringify({ ok: true, hostAccessBeforeSidebarBoot: true, nativeSidebarIdentity: true, firefoxTabMentionsBeforeUpstreamBoot: true, sidebarReadyBeforeUpstreamBoot: true }, null, 2));
+
+const css = fs.readFileSync("extension/codex-sidepanel/firefox-sidebar-layout.css", "utf8");
+assert.ok(html.includes("firefox-sidebar-layout.css"));
+assert.match(css, /min-height:\s*0/u);
+assert.match(css, /@container composer-footer/u);
+assert.match(css, /overscroll-behavior-x:\s*contain/u);
