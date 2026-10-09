@@ -825,6 +825,12 @@
             });
             return { parts };
           }
+          /**
+           * Resolve supported locator chains without dynamic string evaluation.
+           * @param {{parts: Array<{name: string, body: string}>}} parsedSelector Parsed locator engines.
+           * @param {Document|Element|ShadowRoot} root The document or subtree to search.
+           * @returns {(Element|Document)[]} Unique matching nodes, preserving selector order.
+           */
           querySelectorAll(parsedSelector, root) {
             let matches = [root];
             const deepQuery = (scope, selector) => {

@@ -975,6 +975,7 @@ assert.equal(strictCspDynamicEvaluationAttempts, dynamicEvaluationAttemptsBefore
 // These nodes deliberately belong to another realm: instanceof the parent
 // Element would skip all ancestor checks after enter-frame.
 class ForeignElement {
+  /** Model an iframe element outside the parent window's Element realm. */
   constructor(tagName, attributes = {}, parentElement = null) {
     this.nodeType = 1;
     this.tagName = tagName;
